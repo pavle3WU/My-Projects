@@ -1,0 +1,605 @@
+---
+title: "Spotify"
+author: "Group 3"
+date: "2025-05-18"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Introduction
+
+The digital age has changed the way we listen to music. From what began as physical media in the form of CDs transitioned into digital downloads and now is predominantly consumed through streaming services such as Spotify. These services aggregate data on many songs and listeners. The aim of this project is to analyze this data to predict song popularity based on audio features through the application of machine learning regression algorithms. Predictive insights can assist artists, producers, and record labels in developing content tailored to the preferences of the listeners.
+
+# Motivation
+
+This project is motivated by academic interest and practical industry relevance. From an academic perspective, analyzing song popularity factors helps in the continued research of digital culture and consumer behavior in the streaming era. Music has become one of the most influential forms of media on the internet, and streaming data offers a unique opportunity to study how individuals consume music. Moreover, this project is a way of implementing regression-based machine learning models, illustrating their limitations and usefulness in predicting outcomes when applied to cultural data.
+
+From an industry perspective, the ability to predict the popularity of a song can provide valuable insights for artists, producers, and music executives. For instance, being aware of which musical features, such as tempo, danceability, or mood, are best correlated with hit songs can affect artistic decisions in producing music. It can also help artists and labels make more informed decisions in the promotion and release of a song. In a competitive and rapidly evolving music landscape, such data-driven decision-making can be a tremendous competitive advantage. Lastly, this project highlights how music data can be utilized to optimize outcomes in the music industry.
+
+# Data Analytics Project
+
+With our project we wanted to analyze Spotify data, focusing on predicting the popularity of songs based on various audio features such as energy, danceability, loudness, and genre. The goal is to build regression models, such as linear regression, regression trees, and random forests, to understand the relationship between audio characteristics and a song's success, and to compare their predictive performance.
+
+The dataset includes 15 variables describing 1,994 songs. Three are categorical: Title, Artist, and Top.Genre, which provide basic song details. The remaining variables are numerical audio features. These include Year (release year), BPM (tempo), Energy (intensity), Danceability (suitability for dancing), Loudness (volume in dB), Liveness (live performance likelihood), Valence (emotional positivity), Length (duration in seconds), Acousticness, Speechiness (spoken content), and Popularity, Spotify’s internal score from 0 to 100.
+
+Before conducting the analysis, we ensured the dataset was clean and properly structured, removed irrelevant columns, and converted feature types as needed. We then trained and evaluated different models using cross-validation, and assessed their performance based on RMSE and R². The insights gained can help producers and record labels make data-driven decisions about song production and promotion.
+
+# Libraries
+
+Before actually starting with the project, we installed the required packages in R and implemented helper function, which were later used.
+
+```{r setup_libraries_final_v3, include=FALSE}
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(partykit)
+library(ranger)
+library(kableExtra)
+library(tidyr)
+library(ggrepel)
+```
+
+```{r define_helper_functions, include=FALSE}
+calculate_metrics <- function(actual, predicted) {
+  valid_indices <- !is.na(actual) & !is.na(predicted)
+  actual_valid <- actual[valid_indices]
+  predicted_valid <- predicted[valid_indices]
+
+  if(length(actual_valid) < 2) {
+    return(list(RMSE = NA_real_, R2 = NA_real_))
+  }
+  rmse_val <- sqrt(mean((actual_valid - predicted_valid)^2))
+  if (var(actual_valid) == 0) {
+    if (all(actual_valid == predicted_valid)) {
+        r_squared_val <- 1.0
+    } else {
+        r_squared_val <- NA_real_
+    }
+  } else {
+    r_squared_val <- 1 - sum((actual_valid - predicted_valid)^2) / sum((actual_valid - mean(actual_valid))^2)
+  }
+  return(list(RMSE = rmse_val, R2 = r_squared_val)) 
+}
+```
+
+# Data preparation
+
+First, we are reading in the data.
+
+```{r}
+data <- read.csv("~/Desktop/Spotify-2000.csv")
+# will be used later on in our project
+data1 <- read.csv("~/Desktop/Spotify-2000.csv")
+```
+
+Now we look at the head and str to understand the variables better.
+
+```{r}
+head(data)
+str(data)
+```
+
+Before checking for missing values, we rename and convert the types of some columns like "Length..Duration.", "Title","Artist","Top.Genre" and then run str () again to confirm the changes.
+
+```{r}
+Duration <- "Length..Duration."
+data[[Duration]] <- as.numeric(gsub(",", "", data[[Duration]]))
+data$Top.Genre <- as.factor(data$Top.Genre)
+data$Title <- as.factor(data$Title)
+data$Artist <- as.factor(data$Artist)
+str (data)
+```
+
+Now, checking for Number of missing values per column, because we want a complete dataset to do a proper analysis. 
+
+```{r}
+colSums(is.na(data))
+```
+Variables such as Title, Artist and Top.Genre were removed due to their high cardinality (1958/731/149 levels), which could lead to overfitting in the models. Index isn't a necessary column and therefore also removed.
+
+```{r}
+data <- data[, -c(1:4)]
+
+#Final cleanup: dropping any rows with NAs to be a 100% sure (even if no rows are removed) our models don’t break due to a rogue NA)
+data <- na.omit(data)
+```
+
+Setting the target variable for modeling and making our code more flexible.
+
+```{r}
+target_var <- "Popularity"
+```
+
+As a last step doing str () once again to ensure everything was made properly.
+
+```{r}
+str(data)
+```
+
+# Regression
+
+## Multiple Linear Regression
+
+We'll start off with buildung a multiple linear regression model. Therefore, we split the dataset into training and testing sets (80/20 split), because we want to evaluate how well our model generalizes to unseen data.
+
+```{r}
+set.seed(123)
+split_index <- createDataPartition(data$Popularity, p = 0.8, list = FALSE)
+train <- data[split_index, ]
+test  <- data[-split_index, ]
+```
+
+Now we train a linear regression model using all available predictors on the training data.
+
+```{r}
+fitAll <- lm(Popularity ~ ., data = train)
+summary(fitAll)
+```
+
+We see that some variables like BPM, Valence or Acousticness have a p-value over 0.05 and are therefore not significant for our model.
+
+Predicting Popularity on the test set using the model we just trained (fitAll)
+
+```{r}
+lm_pred <- predict(fitAll, newdata = test)
+```
+
+Now we calculate the RMSE and R² to evaluate how well our model predicts the test data.
+
+```{r}
+rmse_lm <- sqrt(mean((lm_pred - test$Popularity)^2))
+r2_lm <- 1 - sum((lm_pred - test$Popularity)^2) / sum((test$Popularity - mean(test$Popularity))^2)
+
+rmse_lm
+r2_lm
+```
+
+The RMSE is approximately 13.65, which indicates that the model’s predicted Popularity is off by about 13.65 points on average (on a 0–100 scale). This is a relatively large error, suggesting that our linear model is not very precise.
+The R² of 0.0675 means that only about 6.75% of the variance in song popularity is explained by our predictors. This is very low and suggests that other unobserved factors (such as artist popularity, playlist placements, or viral trends) may play a larger role in determining popularity than the audio features alone.
+Looking at the regression coefficients, we find that Loudness, Danceability, and Speechiness have the strongest positive influence on popularity, while Energy and Liveness are significantly negatively associated. This suggests that louder, more danceable tracks with spoken elements (e.g., rap or pop with vocals) tend to be slightly more popular. However, due to the overall weak fit, we conclude that a simple linear model is not sufficient to predict popularity with high accuracy.
+
+Therefore, we applied a stepwise backward selection to remove the non-significant variables and refine the linear regression model for predicting song popularity. This method iteratively removed predictors based on AIC.
+
+```{r}
+results <- data.frame(Model = character(),
+                      Set = character(),
+                      RMSE = numeric(), 
+                      R2 = numeric(),  
+                      stringsAsFactors = FALSE)
+fitStepwise = step(fitAll, direction = "backward")
+summary(fitStepwise)
+
+# Adding Linear Regression results
+lm_train_pred <- predict(fitAll, newdata = train)
+lm_test_pred  <- predict(fitAll, newdata = test)
+
+results <- rbind(results,
+  data.frame(Model = "Linear Regression", Set = "Train", as.data.frame(calculate_metrics(train[[target_var]], lm_train_pred))),
+  data.frame(Model = "Linear Regression", Set = "Test",  as.data.frame(calculate_metrics(test[[target_var]],  lm_test_pred)))
+)
+
+# Adding Stepwise Regression results
+step_train_pred <- predict(fitStepwise, newdata = train)
+step_test_pred  <- predict(fitStepwise, newdata = test)
+
+results <- rbind(results,
+  data.frame(Model = "Stepwise Linear Regression", Set = "Train", as.data.frame(calculate_metrics(train[[target_var]], step_train_pred))),
+  data.frame(Model = "Stepwise Linear Regression", Set = "Test",  as.data.frame(calculate_metrics(test[[target_var]],  step_test_pred)))
+)
+
+results
+```
+
+The final stepwise model retained predictors such as Year, Energy, Danceability, Loudness, Liveness, Duration, Acousticness, and Speechiness. The variable Beats Per Minute (BPM) was dropped early in the process due to its negligible impact on reducing the AIC. Interestingly, the stepwise model included Valence and Acousticness despite them being statistically non-significant (according to the p-value). They weren't removed because dropping them wouldn't have reduced the AIC.
+
+The R² remained at 6.76%, very close to the full model’s value of 6.75%, indicating that the reduced model explains almost the same amount of variation in popularity as the full model. This means that we can simplify the model without losing much predictive power, improving interpretability.
+
+Among the retained predictors, variables like Loudness, Danceability, and Speechiness were highly statistically significant, suggesting these audio features are more consistently associated with higher popularity. Meanwhile, features like Valence, Duration, and Acousticness were weaker predictors, but possibly retained for their small contributions to model performance.
+
+Despite this optimization, the overall predictive power remains low, confirming that linear regression (even when refined) is limited in its ability to model popularity based solely on audio features. This highlights the importance of testing non-linear models such as regression trees and random forests in the following sections.
+
+## Decision Tree
+
+Now we train a regression tree (Full tree) to predict Popularity using all variables in the training set. We predict on both the train and test set and store the results (RMSE and R²) using our metric function. The regression tree is visualized below using the partykit package.
+
+```{r}
+full_tree <- rpart(Popularity ~ ., data = train, control = list(cp = 0))
+pred_train_tree <- predict(full_tree, train)
+pred_test_tree  <- predict(full_tree, test)
+
+# appending results to the data frame
+results <- rbind(results,
+  data.frame(Model = "Full Tree", Set = "Train", as.data.frame(calculate_metrics(train[[target_var]], pred_train_tree))),
+  data.frame(Model = "Full Tree", Set = "Test", as.data.frame(calculate_metrics(test[[target_var]], pred_test_tree))))
+
+plot(as.party(full_tree))
+```
+
+The unpruned decision tree has hundreds of splits because it is overfitting and it is very hard to interpret but we can still look at the variable importance.
+
+```{r}
+#Looking at the importance of the variables:
+if (!is.null(full_tree$variable.importance) && length(full_tree$variable.importance) > 0) {
+  par(mar = c(10, 4, 4, 2) + 0.1)
+  plot(as.table(full_tree$variable.importance), ylab = "Importance", main = "Importance of independent variables (Full Tree)", las = 3)
+  par(mar = c(5.1, 4.1, 4.1, 2.1)) # Reset margins
+}
+```
+We see that Year, Loudness, Acousticness and Danceability are the four most important variables in the full tree. Even though acousticness was considered as not significant in the linear regression model.
+
+To reduce overfitting and simplify the model, we examine the complexity parameter (cp) table and cross-validated error. We then prune the tree using the 7th cp value, which results in the lowest cross-validated error of 0.92658 (xerror), indicating the best generalization to unseen data. While simpler trees with fewer splits offer easier interpretation, they perform slightly worse.
+
+```{r}
+printcp(full_tree)  # Shows table of errors at different tree sizes
+plotcp(full_tree)  # Plots CV error vs. complexity
+
+# Pruning the tree at our chosen cp value (7th row)
+pruned_tree <- prune(full_tree, cp = full_tree$cptable[7, "CP"])
+plot(as.party(pruned_tree))
+```
+
+The pruned decision tree contains ten splits and eleven terminal nodes (leaves). The model splits the data using five predictors: Year, Loudness, Danceability, Liveness, and Speechiness and therefore shows the variable importance of each feature in the tree. Variables like Year, Loudness, and Danceability appear most impactful based on total reduction in SSE.
+
+```{r}
+# Showing the importance of the pruned tree
+if (!is.null(pruned_tree$variable.importance) && length(pruned_tree$variable.importance) > 0) {
+  par(mar = c(10, 4, 4, 2) + 0.1)
+  plot(as.table(pruned_tree$variable.importance), ylab = "Importance", main = "Importance of independent variables (Pruned Tree)", las = 3)
+  par(mar = c(5.1, 4.1, 4.1, 2.1)) # Reset margins
+}
+```
+
+Compared to the full tree we see that the variable importance of acousticness in the pruned tree is way smaller, this is due to overfitting of the full tree.
+
+```{r}
+# appending results to the data frame
+pred_train_pruned <- predict(pruned_tree, train)
+pred_test_pruned  <- predict(pruned_tree, test)
+ 
+results <- rbind(results,
+  data.frame(Model = "Pruned Tree", Set = "Train", as.data.frame(calculate_metrics(train[[target_var]], pred_train_pruned))),
+  data.frame(Model = "Pruned Tree", Set = "Test", as.data.frame(calculate_metrics(test[[target_var]], pred_test_pruned))))
+
+results [5:8, ]
+```
+
+The Full decision tree model revealed some non-linear relationships, again highlighting features like Loudness and Danceability. While it's training R² was 50.25% and RMSE 10.1, the test R² was -27.47% and the test RMSE was 15.96, indicating overfitting and poor predictive accuracy. The pruned tree performed way better with a R² of 2.49% and an RMSE of 13.96, but which is still a bad score and also indicates overfitting and poor predictive accuracy, showing the tree's limitations.
+
+In conclusion, both linear and tree-based models failed to capture the complexity behind song popularity. This reinforces the idea that external factors, such as artist fame, playlist placement, or social media influence, likely play a much greater role. These findings support the use of more robust models like Random Forests, which are better suited to handle complex interactions and reduce overfitting. Therefore, we will train a random Forest model now.
+
+## Random Forest
+
+Training a Random Forest using 500 trees and permutation importance.
+
+```{r}
+rf_model <- ranger(Popularity ~ ., data = train, importance = "permutation", num.trees = 500, seed = 123)
+print(rf_model)
+```
+
+Here we can see that we trained the model using 500 trees and a permutation-based variable importance was used to evaluate which predictors had the strongest influence on popularity. According to the model summary, the OOB R² is approximately 0.153, meaning that the model explains around 15.3% of the variation in popularity scores.
+
+The OOB MSE is 175.78, corresponding to an approximate RMSE of 13.26, indicating that predictions on average deviate from the true popularity score by about 13 points. While still not highly precise, this is comparable to the decision tree and linear regression errors, and suggests that Random Forests offer slightly better predictive performance without the overfitting issues observed in the decisions tree.
+
+```{r}
+pred_train_rf <- predict(rf_model, data = train)$predictions
+pred_test_rf  <- predict(rf_model, data = test)$predictions
+
+results <- rbind(results,
+  data.frame(Model = "Random Forest", Set = "Train", as.data.frame(calculate_metrics(train[[target_var]], pred_train_rf))),
+  data.frame(Model = "Random Forest", Set = "Test", as.data.frame(calculate_metrics(test[[target_var]], pred_test_rf))))
+
+par(mar = c(10, 4, 4, 2) + 0.1)
+barplot(sort(importance(rf_model), decreasing = TRUE), las = 3, main = "RF Variable Importance")
+par(mar = c(5.1, 4.1, 4.1, 2.1))
+```
+
+Looking at the variable importance plot, the most influential feature was Year, suggesting that when a song was released plays a major role in determining its popularity. This makes sense in the context of changing music trends and the increasing impact of digital platforms over time.
+
+Other important predictors included Loudness and Danceability, which were consistently highlighted across earlier models as well. The Random Forest model stabilizes the influence of our features while capturing deeper interactions and nonlinear effects.
+
+## Partial Dependency Plot (PDP)
+
+We generated a Partial Dependency Plot (PDP) combined with Individual Conditional Expectation (ICE) lines for the variable Loudness (in dB) using the Random Forest model, which previously achieved the highest test R² among our models (~15%).
+
+```{r}
+pdp_variable <- "Loudness..dB." 
+
+if (pdp_variable %in% names(train) && exists("rf_model")) { 
+    
+  grid_pdp <- seq(min(train[[pdp_variable]], na.rm = TRUE), 
+                  max(train[[pdp_variable]], na.rm = TRUE), 
+                  length.out = 100)
+
+  sample_data_pdp <- train[sample(nrow(train), min(1000, nrow(train))), ]
+
+  values_matrix <- sapply(grid_pdp, function(val) {
+    temp_data <- sample_data_pdp
+    temp_data[[pdp_variable]] <- val
+    predict(rf_model, data = temp_data)$predictions 
+  })
+  
+  ice_lines <- t(values_matrix)
+
+  matplot(grid_pdp, ice_lines, 
+          type = "l", 
+          col = rgb(0.1, 0.1, 0.1, 0.05), 
+          lty = 1,
+          xlab = "Loudness (dB)", 
+          ylab = paste("Predicted", target_var, "(ICE lines)"),
+          main = paste("PDP for Loudness (dB) (RF)"))
+  
+  average_pdp_line <- apply(values_matrix, 2, mean) 
+  lines(grid_pdp, average_pdp_line, col="blue", lwd=2)
+
+}
+```
+
+In the resulting plot, the blue line overlays the average trend across all sampled observations, showing the estimated partial effect of Loudness on predicted popularity.
+
+The blue PDP curve shows a modest upward slope, suggesting that higher loudness values (closer to 0 dB) are associated with slightly higher predicted popularity scores. This would also align with our musical intuition: louder songs may be perceived as more energetic or attention-grabbing, characteristics often seen in pop and mainstream tracks. The trend is not steep, which is consistent with the Random Forest's overall low R², meaning the model detects some signal, but the effect size is small and possibly masked by noise in the dataset.
+
+The relatively dense overlap of ICE lines indicates that individual predictions vary somewhat, but still follow the general upward trend.
+
+Importantly, we interpret this PDP cautiously. The low overall performance of the model implies that external, unmodeled factors (e.g., marketing, artist fame, playlist exposure) likely have a much stronger impact on popularity than Loudness or any other single audio feature in our dataset. Still, these insights help us understand which technical song attributes may contribute to broader patterns of success in music streaming data.
+
+# K-Fold Cross-Validation and MSE Boxplot
+
+To compare model performance, we conducted a 10-fold cross-validation and visualized the Mean Squared Errors (MSE) using a boxplot.
+
+```{r}
+set.seed(123) 
+n <- nrow(data) 
+fold <- 10 
+folds <- sample(rep(1:fold, ceiling(n/fold)), n)
+
+mse_results <- list() 
+
+formula_cv_str <- paste0("`", target_var, "` ~ .")
+formula_cv_obj_cv <- as.formula(formula_cv_str)
+
+for (tfold in seq_len(fold)) {
+  train_idx <- which(folds != tfold)
+  test_idx <- which(folds == tfold)
+  
+  train_cv <- data[train_idx, ]
+  test_cv <- data[test_idx, ]
+  
+  rf_model <- ranger(formula_cv_obj_cv, data = train_cv, seed = 123)
+  tree_cv_model <- rpart(formula_cv_obj_cv, data = train_cv, method = "anova")
+  cp_to_use <- tree_cv_model$cptable[which.min(tree_cv_model$cptable[,"xerror"]), "CP"]
+  pruned_tree_cv_model <- prune(tree_cv_model, cp = cp_to_use)
+  lm_cv_model <- lm(formula_cv_obj_cv, data = train_cv)
+  step_cv_model <- step(lm(formula_cv_obj_cv, data = train_cv), direction = "backward")
+  
+  pred_rf_cv <- predict(rf_model, data = test_cv)$predictions
+  pred_tree_cv <- predict(tree_cv_model, newdata = test_cv)
+  pred_pruned_tree_cv <- predict(pruned_tree_cv_model, newdata = test_cv)
+  pred_lm_cv <- predict(lm_cv_model, newdata = test_cv)
+  pred_step_cv <- predict(step_cv_model, newdata = test_cv)
+
+    mse_results[[tfold]] <- sapply(
+    list(RF = pred_rf_cv, tree = pred_tree_cv, pruned = pred_pruned_tree_cv, Linear = pred_lm_cv, step = pred_step_cv), 
+    function(pred) { mean((test_cv[[target_var]] - pred)^2) }
+  )
+}
+
+mse_cv_dataframe_plot <- do.call("rbind", mse_results)
+colnames(mse_cv_dataframe_plot) <- c("Random Forest", "Full Tree", "Pruned Tree", "LR", "Stepwise LR")
+mse_cv_dataframe_plot <- mse_cv_dataframe_plot[, c("LR", "Stepwise LR", "Full Tree", "Pruned Tree", "Random Forest")]
+
+# Adjusting margins to make space for labels
+par(mar = c(6, 4, 4, 2) + 0.1)
+
+boxplot(mse_cv_dataframe_plot, 
+        ylab = "Cross-validated Mean Squared Error (MSE)",
+        main = "CV Model Comparison (MSE)",
+        las=1, cex.axis  = 0.8)
+
+```
+
+Linear Regression exhibits a lower median MSE than both tree models and has a narrower spread, reflecting more consistent performance.
+
+Stepwise LR achieves a similar median MSE like LR, suggesting no big improvements through variable selection. The variability remains similarly low, indicating stable and reliable performance across folds.
+
+The Full Tree model has the highest median MSE and a wide spread, suggesting both lower accuracy and higher variability. Its performance is highly unstable across folds, likely due to overfitting in the unpruned tree.
+
+The Pruned Tree slightly improves upon the full tree with a slighty lower median MSE and fewer extreme values. However the spread was reduced by a lot which indicates that pruning alone does stabilize the model a bit but the high MSE makes both trees the worst performing models.
+
+The Random Forest model achieved the lowest median MSE, making it the most accurate overall. It shows tight variability and a few low outliers, indicating that some folds yielded exceptionally strong predictions.
+
+# Results Summary Tables
+
+The summary table presents the performance metrics for all evaluated models (Linear Regression, Stepwise Regression, Full tree, Unpruned tree, and Random Forest) on both the training and test datasets.
+
+
+```{r}
+results_to_process <- results 
+
+numeric_rmse_values <- as.numeric(results_to_process[["RMSE"]])
+numeric_r2_values <- as.numeric(results_to_process[["R2"]])
+
+rounded_rmse <- round(numeric_rmse_values, 2)
+rounded_r2 <- round(numeric_r2_values, 4)
+
+results_for_display <- data.frame(
+  Model = results_to_process$Model,
+  Set = results_to_process$Set,
+  rmse = rounded_rmse,
+  r_squared = rounded_r2,
+  stringsAsFactors = FALSE
+)
+
+kable(results_for_display, 
+      caption = "Train and Test Set Performance Metrics", 
+      col.names = c("Model", "Set", "RMSE", "R²")) %>% 
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed")) %>%
+  column_spec(1, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top")
+```
+
+We used the kable() function with the kableExtra package to generate a clean summary table. This table displays the RMSE and R² values for each model on both the training and test sets and we implemented collapse_rows() function so that we can group the rows by model name to improve readability and making it easier to compare results across sets.
+
+First, let's consider the linear regression models.
+The full Linear Regression model (fitAll), which utilized all available audio features, achieved an R² of 15.36% on the training data, as shown in our results table. This R² value indicates the proportion of variance in popularity explained by this model on the data it was trained on. On the test set, it reached an RMSE of 13.65 and an R² of 6.75%.
+
+The Stepwise Linear Regression model (fitStepwise) was derived from the full model through a backward selection process, which identified Beats.Per.Minute..BPM. for removal. According to our results table, this stepwise model achieved an R² of 15.35% on the training data. When evaluated on the test data, the stepwise model yielded an RMSE of 13.65 and an R² of 6.76%.
+
+Comparing the two linear models based on our results table, the simplification achieved by removing BPM in the stepwise model did not lead to any notable deterioration in the R² on the training and test data.
+
+If we look at the decision trees we see that the full tree had an negative test R² and the highest test RMSE with 15.96. Which makes it the worst performing model.
+
+After pruning the tree by taking the complexity parameter with the lowest cross-validated error the test R² improved to 2.49% and the test RMSE was 13.96.
+
+Even after pruning the tree, the regression tree is the worst performing model in consideration of the R² and the RMSE. 
+
+And finally we have the random forest which had the smallest RMSE with 13.43 and the highest R² with 9.85% which makes it the best performing model.
+
+# Visualizations
+
+We now aim to create visualizations for our top 4 variables (Year, Loudness, Danceability, and Energy) not necessarily because we expect them to have strong predictive power, but because exploring them visually can still offer valuable insights. Even if these variables do not significantly influence popularity in our models, understanding their distributions and relationships may help us better interpret the dataset and uncover underlying patterns or trends that aren't immediately obvious from raw numbers alone.
+
+```{r}
+data$Year <- as.numeric(as.character(data$Year))
+
+pop_by_year <- data %>%
+  group_by(Year) %>%
+  summarise(Average_Popularity = mean(Popularity, na.rm = TRUE))
+
+# Create line chart
+ggplot(pop_by_year, aes(x = Year, y = Average_Popularity)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "darkblue", size = 2) +
+  labs(
+    title = "Average Spotify Song Popularity by Year",
+    x = "Year",
+    y = "Average Popularity"
+  ) +
+  theme_minimal()
+```
+
+The line chart illustrates the average popularity of Spotify songs across different years, offering insights into how musical trends and listener preferences have evolved over time.
+
+It's notable that there were a high popularity of songs from the late 1950s and early 1960s, where the average popularity exceeded 75 in some years. This peak may be attributed to the long-lasting impact and continued streaming of classic hits from that era, which are often considered timeless.
+
+After the peak in the 1960s, the average popularity shows a noticeable decline, where values mostly range between 57 and 65, reaching a low point at 55. Rather than indicating a lack of popular music, this trend may suggest that songs from these decades are less dominated by a few highly streamed hits, possibly because they don’t benefit as strongly from current playlist algorithms or viral rediscovery. Instead, a broader mix of moderately popular songs appears to characterize this era’s presence on Spotify.
+
+In the years approaching 2010–2020, a slight upward trend emerges again, although variability increases. The average popularity in recent years fluctuates more strongly, likely due to the rapidly changing music landscape and the influence of streaming algorithms, viral hits, and social media trends on listening behavior.
+
+```{r}
+trend_data <- data%>%
+  group_by(Year) %>%
+  summarise(
+    Avg_Loudness = mean(Loudness..dB., na.rm = TRUE),
+    Avg_Popularity = mean(Popularity, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = c(Avg_Loudness, Avg_Popularity), names_to = "Metric", values_to = "Value")
+
+ggplot(trend_data, aes(x = as.numeric(as.character(Year)), y = Value, color = Metric)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  labs(title = "Average Loudness and Popularity Over Time", x = "Year", y = "Value") +
+  theme_minimal()
+```
+
+The chart illustrates the evolution of average loudness and average popularity of Spotify songs over time.
+
+A key observation is that average loudness (in dB) has shown a slight upward trend since the 1980s, suggesting that songs have gradually become louder, which is a known phenomenon often referred to as the "loudness war". Although the change is modest in the chart, it reflects the industry's tendency to favor louder mixes to stand out in playlists and radio broadcasts.
+
+In contrast, average popularity has remained relatively stable over time, hovering mostly between 55 and 70. Despite fluctuations, there is no clear long-term upward or downward trend. This stability suggests that popularity, as measured on Spotify, may be influenced more by listener behavior, platform algorithms, and playlist placements than by specific audio features like loudness.
+
+Overall, while production trends such as loudness have evolved, popularity appears to be governed by a broader and more complex set of factors, highlighting once again the multifaceted nature of music success in the streaming era.
+
+```{r}
+trend_data <- data %>%
+  group_by(Year) %>%
+  summarise(
+    Avg_Energy = mean(Energy, na.rm = TRUE),
+    Avg_Popularity = mean(Popularity, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = c(Avg_Energy, Avg_Popularity), names_to = "Metric", values_to = "Value")
+
+ggplot(trend_data, aes(x = as.numeric(as.character(Year)), y = Value, color = Metric)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  labs(title = "Trends in Energy and Popularity Over Time",
+       x = "Year",
+       y = "Average Value",
+       color = "Metric") +
+  theme_minimal()
+```
+
+This line chart compares the average energy and average popularity of songs over time, revealing interesting dynamics between the perceived intensity of music and its overall listener reception.
+
+The energy metric,  which captures how fast, loud, and intense a song feels, shows significant fluctuations over the decades. After a volatile period in the early years (1950s–1960s), the average energy increased steadily through the 1970s to early 2000s, reaching several peaks above 70. This trend reflects the rise of energetic genres like rock, electronic, and later dance-pop.
+
+In contrast, average popularity has remained relatively stable over time, with values mostly oscillating between 55 and 70. Although there are occasional spikes (particularly in the late 1950s and again post-2010) there is no clear long-term correlation with energy. This also suggests that high energy alone doesn't guarantee popularity, and that listener preferences are shaped by a broader mix of factors, including lyrics, mood, and social or algorithmic influence.
+
+Interestingly, in some periods (e.g., around 2005), higher energy tracks do align with slightly higher popularity, indicating moments where intense, dynamic music had mainstream appeal. Still, the overall pattern suggests that the relationship between energy and popularity is not consistent over time.
+
+As we now know, popular songs from the 60s had low average Energy, defining a trend for that time period. Let's see if there are any popular songs from the 60s that contradict this trend and have high energy. To be able to see these songs we use the full dataset (data1) which includes Title and Artist.     
+
+```{r}
+
+songs_60s <- data1 %>%
+  filter(Year >= 1960 & Year < 1970)
+
+energy_threshold <- quantile(songs_60s$Energy, 0.75, na.rm = TRUE)
+popularity_threshold <- quantile(songs_60s$Popularity, 0.90, na.rm = TRUE)
+
+outlier_songs <- songs_60s %>%
+  filter(Energy > energy_threshold & Popularity > popularity_threshold)
+
+outlier_songs %>%
+  select(Title,  Artist, Year, Energy, Popularity)
+
+```
+There are a few really energetic and fairly popular songs from the 60s. The one thing these songs have in common, is that they have been made by some pretty popular artists/bands, like Rolling Stones, Jimi Hendrix (highest paid rock musician) and Creedence Clearwater Revival (popular band from California).
+
+There are also other songs that deny this trend, but no other is as popular and as energetic as these few. Here is a scatter plot of other songs that deny this trend:
+
+```{r}
+ggplot(songs_60s, aes(x = Energy, y = Popularity)) +
+  geom_point(alpha = 0.3) +
+  geom_point(data = outlier_songs, color = "red", size = 3) +
+  geom_text_repel(data = outlier_songs, aes(label = Title), size = 3) +
+  labs(title = "1960s Songs That Defy Energy-Popularity Trend",
+       x = "Energy",
+       y = "Popularity") +
+  theme_minimal()
+```
+```{r}
+ggplot(data, aes(x = Danceability, y = Popularity)) +
+  geom_point(alpha = 0.4, color = "royalblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dashed") +
+  labs(
+    title = "Relationship Between Danceability and Popularity",
+    x = "Danceability",
+    y = "Popularity"
+  ) +
+  theme_minimal()
+```
+
+Now, coming to the last variable. The scatterplot illustrates the relationship between Danceability and Popularity of songs in the dataset. While the points are widely scattered, the added linear trend line (in red) suggests a slightly positive association between the two variables.
+
+However, the spread of the data around the trend line also indicates that Danceability alone does not strongly predict Popularity. This weak linear relationship implies that although more danceable songs may be somewhat more popular on average, many highly danceable songs are not particularly popular, and vice versa.
+
+Such a finding is important for us: it suggests that Danceability may contribute to popularity, but is not a dominant factor on its own, and its impact should likely be interpreted in combination with other features such as Energy, Loudness, or Release Year.
+
+# Conclusion
+
+In this project, we set out to analyze Spotify data with the goal of predicting the popularity of songs based on their audio features. We implemented and compared regression models like Linear Regression, Stepwise Regression, Decision Trees, Random Forests, etc. Additionally, we applied cross-validation and used techniques such as Partial Dependency Plots (PDPs) to interpret model behavior.
+
+Key findings from our analysis:
+
+ * All models achieved relatively low predictive accuracy, with Random Forests performing best (test R² = 10%).
+ * Features such as Loudness, Year of Release, Danceability, and Energy consistently appeared as the most influential predictors.
+ * Decision Trees revealed interesting interaction patterns but suffered from overfitting in their unpruned form. Pruning helped reduce overfitting, though generalization is still weak.
+ * Random Forests offered more stable results and captured non-linear patterns better, though even they could not explain most of the variation in
+   popularity.
+   
+Ultimately, our results confirm that audio features alone are insufficient to accurately predict song popularity on Spotify. Factors like artist fame, social media presence, playlist placements, and viral trends likely play a much greater role, but these were not part of our dataset.
+
+We wanted to demonstrate with the project that machine learning can help identify trends and patterns, but also highlights the limitations of prediction when critical external variables are unavailable. Future research could enhance performance by integrating social and contextual data (e.g., follower counts, release strategies, or marketing campaigns).
